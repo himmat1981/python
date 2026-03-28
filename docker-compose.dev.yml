@@ -1,5 +1,4 @@
 services:
-
   vector-db:
     image: pgvector/pgvector:pg16
     container_name: pgvector-db
@@ -20,17 +19,18 @@ services:
       start_period: 20s
 
   python-api:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
+    build: .
     container_name: vector-api
     restart: always
     ports:
       - "8000:8000"
     env_file:
-      - .env
+      - .env   # ✅ FIXED
     environment:
       DATABASE_URL: postgresql://postgres:postgres@pgvector-db:5432/vectors
       LLM_MODEL: llama-3.3-70b-versatile
     volumes:
+      - .:/app
       - lora_data:/app/lora_adapter
     depends_on:
       vector-db:
