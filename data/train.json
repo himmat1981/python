@@ -1,0 +1,14 @@
+[
+    {
+      "instruction": "What is Drupal?",
+      "response": "Drupal is an open-source CMS written in PHP."
+    },
+    {
+      "instruction": "What is Apache Solr?",
+      "response": "Apache Solr is a powerful search platform used for indexing and querying data."
+    },
+    {
+      "instruction": "What is SAML?",
+      "response": "SAML is a protocol used for Single Sign-On authentication."
+    }
+  ]

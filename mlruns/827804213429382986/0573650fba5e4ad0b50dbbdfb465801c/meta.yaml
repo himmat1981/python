@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/0573650fba5e4ad0b50dbbdfb465801c/artifacts
+end_time: 1774341937417
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 0573650fba5e4ad0b50dbbdfb465801c
+run_name: dashing-ram-236
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1774341937383
+status: 3
+tags: []
+user_id: root
