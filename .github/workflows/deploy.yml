@@ -25,7 +25,7 @@ jobs:
 
       - name: Build & Push Python API
         run: |
-          docker build -t vector-api:latest ./python
+          docker build -t vector-api:latest .
           docker tag vector-api:latest \
             ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
           docker push \
