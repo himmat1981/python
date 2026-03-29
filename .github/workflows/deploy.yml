@@ -25,11 +25,11 @@ jobs:
 
       - name: Build & Push Python API
         run: |
-          docker build -t vector-api ./python
+          docker build -t vector-api:latest ./python        # ← added :latest
           docker tag vector-api:latest \
-          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
           docker push \
-          ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
@@ -38,14 +38,22 @@ jobs:
           username: ec2-user
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            export AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
+
+            # Sync latest code (compose file, configs)
+            cd /home/ec2-user/vector-app
+            git pull origin python-main
+
+            # Create external network if it doesn't exist
+            docker network create common-net || true
+
+            # Login to ECR
             aws ecr get-login-password --region ap-south-1 | \
             docker login --username AWS --password-stdin \
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com
+            ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com
 
-            docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
-
-            docker stop vector-api || true
-            docker rm vector-api || true
-
-            docker run -d -p 8000:8000 --name vector-api \
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.ap-south-1.amazonaws.com/vector-api:latest
+            # Pull latest image & restart via compose
+            docker compose pull
+            docker compose down
+            docker compose up -d
+            docker image prune -f
