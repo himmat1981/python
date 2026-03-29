@@ -2,7 +2,7 @@ name: Deploy Python API
 
 on:
   push:
-    branches: [ python-main ]
+    branches: [ main ]
 
 jobs:
   deploy:
