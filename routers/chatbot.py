@@ -1,3 +1,10 @@
+"""
+routers/chatbot.py
+
+Clean RAG-only chatbot using LangGraph.
+LoRA removed — all answers via pgvector + Groq LLM.
+"""
+
 from fastapi import APIRouter, HTTPException
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Optional
@@ -6,7 +13,6 @@ from models.schemas import ChatRequest
 from services.spam import detect_spam
 from services.embeddings import encode
 from services.llm import chat
-from services.lora_model import lora_answer, check_lora_confidence
 from services.mlflow_tracker import track_chatbot, Timer
 from db.vectors import search_similar, log_spam, get_spam_logs
 from config import LLM_MODEL
@@ -16,13 +22,10 @@ router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 
 # ── LangGraph State ───────────────────────────────────────────
 class ChatState(TypedDict):
-    question:        str
-    context:         List[dict]
-    answer:          str
-    spam_reason:     Optional[str]
-    lora_result:     dict          # stores lora answer + confidence
-    final_source:    str           # "lora" or "rag"
-    route_decision:  str           # "lora_accepted" or "rag_fallback"
+    question:     str
+    context:      List[dict]
+    answer:       str
+    spam_reason:  Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -37,55 +40,7 @@ def spam_check_node(state: ChatState) -> ChatState:
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 2 — LoRA Node (always called first)
-# ══════════════════════════════════════════════════════════════
-def lora_node(state: ChatState) -> ChatState:
-    """
-    Try LoRA trained model first.
-    Returns answer + confidence score.
-    If LoRA not trained yet — returns available: False.
-    """
-    result = lora_answer(state["question"])
-
-    print(f"LoRA available: {result['available']}")
-    if result["available"]:
-        print(f"LoRA confidence: {result['confidence']}")
-        print(f"LoRA answer preview: {result['answer'][:80]}")
-
-    return {**state, "lora_result": result}
-
-
-# ══════════════════════════════════════════════════════════════
-# NODE 3 — Confidence Check
-# Decides: accept LoRA answer or fallback to RAG?
-# ══════════════════════════════════════════════════════════════
-def confidence_check_node(state: ChatState) -> ChatState:
-    """
-    Check if LoRA answer is good enough.
-    Three checks: confidence score, uncertainty phrases, answer length.
-    """
-    lora_result = state["lora_result"]
-    is_good     = check_lora_confidence(lora_result)
-
-    if is_good:
-        # LoRA answer accepted — use it
-        return {
-            **state,
-            "answer":         lora_result["answer"],
-            "final_source":   "lora",
-            "route_decision": "lora_accepted",
-        }
-    else:
-        # LoRA failed — fallback to RAG
-        return {
-            **state,
-            "route_decision": "rag_fallback",
-            "final_source":   "rag",
-        }
-
-
-# ══════════════════════════════════════════════════════════════
-# NODE 4 — RAG Retrieve
+# NODE 2 — RAG Retrieve
 # ══════════════════════════════════════════════════════════════
 def retrieve_node(state: ChatState) -> ChatState:
     """Search pgvector for relevant content."""
@@ -95,7 +50,7 @@ def retrieve_node(state: ChatState) -> ChatState:
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 5 — RAG Generate
+# NODE 3 — RAG Generate
 # ══════════════════════════════════════════════════════════════
 def generate_node(state: ChatState) -> ChatState:
     """Generate answer using Groq LLM with retrieved context."""
@@ -119,28 +74,17 @@ def generate_node(state: ChatState) -> ChatState:
         }
     ]
     answer = chat(messages)
-    return {
-        **state,
-        "answer":       answer,
-        "final_source": "rag",
-    }
+    return {**state, "answer": answer}
 
 
 # ══════════════════════════════════════════════════════════════
 # ROUTING FUNCTIONS
 # ══════════════════════════════════════════════════════════════
 def route_after_spam(state: ChatState) -> str:
-    """After spam check — blocked or continue to LoRA."""
+    """After spam check — blocked or continue to RAG."""
     if state["spam_reason"]:
         return "end"
-    return "lora"    # ← always try LoRA first
-
-
-def route_after_confidence(state: ChatState) -> str:
-    """After confidence check — accept LoRA or fallback to RAG."""
-    return state["route_decision"]
-    # "lora_accepted" → END
-    # "rag_fallback"  → retrieve
+    return "retrieve"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -149,40 +93,21 @@ def route_after_confidence(state: ChatState) -> str:
 def build_graph():
     graph = StateGraph(ChatState)
 
-    # Register all nodes
-    graph.add_node("spam_check",       spam_check_node)
-    graph.add_node("lora",             lora_node)
-    graph.add_node("confidence_check", confidence_check_node)
-    graph.add_node("retrieve",         retrieve_node)
-    graph.add_node("generate",         generate_node)
+    graph.add_node("spam_check", spam_check_node)
+    graph.add_node("retrieve",   retrieve_node)
+    graph.add_node("generate",   generate_node)
 
-    # Entry point
     graph.set_entry_point("spam_check")
 
-    # spam_check → blocked OR lora
     graph.add_conditional_edges(
         "spam_check",
         route_after_spam,
         {
-            "end":  END,
-            "lora": "lora"   # ← always goes to LoRA first
+            "end":      END,
+            "retrieve": "retrieve"
         }
     )
 
-    # lora → confidence_check always
-    graph.add_edge("lora", "confidence_check")
-
-    # confidence_check → accept LoRA OR fallback to RAG
-    graph.add_conditional_edges(
-        "confidence_check",
-        route_after_confidence,
-        {
-            "lora_accepted": END,        # LoRA was good → done
-            "rag_fallback":  "retrieve"  # LoRA was bad → RAG
-        }
-    )
-
-    # RAG pipeline
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
 
@@ -198,25 +123,20 @@ rag_graph = build_graph()
 @router.post("/ask")
 async def ask(data: ChatRequest):
     """
-    Answer using LoRA first, RAG as fallback.
+    Answer questions using RAG pipeline.
 
     Flow:
     1. Spam check
-    2. LoRA tries to answer
-    3. Confidence check — good enough?
-    4. If yes → return LoRA answer
-    5. If no  → search pgvector → Groq LLM
+    2. Search pgvector for relevant content
+    3. Groq LLM generates answer from context
     """
     try:
         with Timer() as t:
             result = rag_graph.invoke({
-                "question":       data.question,
-                "context":        [],
-                "answer":         "",
-                "spam_reason":    None,
-                "lora_result":    {},
-                "final_source":   "",
-                "route_decision": "",
+                "question":    data.question,
+                "context":     [],
+                "answer":      "",
+                "spam_reason": None,
             })
 
         # Track in MLflow
@@ -225,7 +145,7 @@ async def ask(data: ChatRequest):
             answer        = result["answer"],
             sources       = result["context"],
             response_time = t.elapsed,
-            model         = f"lora+{LLM_MODEL}",
+            model         = LLM_MODEL,
             spam_detected = bool(result["spam_reason"]),
             spam_reason   = result["spam_reason"],
         )
@@ -242,10 +162,8 @@ async def ask(data: ChatRequest):
             )
 
         return {
-            "question":     data.question,
-            "answer":       result["answer"],
-            "answered_by":  result["final_source"],   # "lora" or "rag"
-            "confidence":   result["lora_result"].get("confidence", 0),
+            "question": data.question,
+            "answer":   result["answer"],
             "sources": [
                 {"node_id": d["node_id"], "title": d["title"]}
                 for d in result["context"]
@@ -266,28 +184,3 @@ async def spam_logs():
         return {"total": len(logs), "logs": logs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/lora-status")
-async def lora_status():
-    """Check if LoRA model is trained and ready."""
-    from services.lora_model import is_lora_trained
-    import json
-    import os
-
-    trained = is_lora_trained()
-    metadata = {}
-
-    if trained:
-        meta_path = "/app/lora_adapter/metadata.json"
-        if os.path.exists(meta_path):
-            with open(meta_path) as f:
-                metadata = json.load(f)
-
-    return {
-        "lora_trained":   trained,
-        "adapter_path":   "/app/lora_adapter",
-        "base_model":     "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-        "metadata":       metadata,
-        "train_command":  "docker exec -it vector-api python scripts/train_lora.py",
-    }

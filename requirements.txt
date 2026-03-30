@@ -17,15 +17,8 @@ sentence-transformers
 psycopg2-binary
 pgvector
 
-transformers
-torch
-sentencepiece
+# Utils
 numpy
 
-# LoRA fine-tuning
-peft              # LoRA adapter library by HuggingFace
-datasets          # HuggingFace datasets for training
-accelerate        # training optimization
- 
 # MLOps
 mlflow

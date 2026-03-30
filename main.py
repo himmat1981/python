@@ -9,12 +9,11 @@ from routers.nlp import router as nlp_router
 from routers import governance
 
 
-
 # ── Create app ────────────────────────────────────────────────
 app = FastAPI(
     title="Drupal AI API",
     description="RAG chatbot + SEO generation + spam detection for Drupal",
-    version="1.0.0",
+    version="2.0.0",
 )
 
 # ── CORS ──────────────────────────────────────────────────────
@@ -37,18 +36,22 @@ app.include_router(chatbot_router)
 app.include_router(seo_router)
 app.include_router(nlp_router)
 app.include_router(governance.router)
+
 # ── Health check ──────────────────────────────────────────────
 @app.get("/")
 def root():
     return {
         "status":   "Drupal AI API running 🚀",
-        "version":  "1.0.0",
+        "version":  "2.0.0",
         "endpoints": {
             "store":        "POST /nodes/store",
             "chatbot":      "POST /chatbot/ask",
             "seo_generate": "POST /seo/generate",
             "seo_cached":   "GET  /seo/cached/{node_id}",
             "spam_logs":    "GET  /chatbot/spam-logs",
+            "nlp_summary":  "POST /nlp/summarize",
+            "nlp_moderate": "POST /nlp/moderate",
+            "governance":   "POST /ai/governance",
             "docs":         "GET  /docs",
         }
     }
