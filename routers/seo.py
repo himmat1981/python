@@ -8,18 +8,9 @@ router = APIRouter(prefix="/seo", tags=["seo"])
 
 @router.post("/generate", response_model=SeoResponse)
 async def generate_seo(data: SeoRequest):
-    """
-    Generate SEO meta title, description and keywords
-    for a Drupal node using Groq LLM.
-
-    First checks cache — if tags already exist for this node,
-    returns cached version without calling LLM again.
-
-    Called by Drupal hook_node_insert / hook_node_update.
-    """
     try:
-        # Check cache first — avoid unnecessary LLM calls
-        cached = get_seo_cache(data.node_id)
+        # Check cache first
+        cached = await get_seo_cache(data.node_id)
         if cached:
             return SeoResponse(
                 node_id    = data.node_id,
@@ -29,11 +20,11 @@ async def generate_seo(data: SeoRequest):
                 cached     = True,
             )
 
-        # Generate fresh SEO tags via LLM
+        # Generate fresh SEO tags
         seo = generate_seo_tags(data.title, data.content)
 
-        # Save to cache for future requests
-        save_seo_cache(
+        # Save to cache
+        await save_seo_cache(
             data.node_id,
             seo["meta_title"],
             seo["meta_desc"],
@@ -54,15 +45,11 @@ async def generate_seo(data: SeoRequest):
 
 @router.get("/cached/{node_id}", response_model=SeoResponse)
 async def get_cached_seo(node_id: int):
-    """
-    Retrieve cached SEO tags for a node.
-    Returns 404 if not yet generated.
-    """
-    cached = get_seo_cache(node_id)
+    cached = await get_seo_cache(node_id)
     if not cached:
         raise HTTPException(
-            status_code=404,
-            detail=f"No SEO tags found for node {node_id}. Call POST /seo/generate first."
+            status_code = 404,
+            detail      = f"No SEO tags found for node {node_id}."
         )
     return SeoResponse(
         node_id    = node_id,

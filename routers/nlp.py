@@ -6,12 +6,12 @@ router = APIRouter(prefix="/nlp", tags=["NLP"])
 
 
 @router.post("/summarize")
-def summarize(request: TextRequest):
+async def summarize(request: TextRequest):
     summary = summarize_text(request.text)
     return {"summary": summary}
 
 
 @router.post("/moderate")
-def moderate(request: TextRequest):
+async def moderate(request: TextRequest):
     result = moderate_text(request.text)
     return result

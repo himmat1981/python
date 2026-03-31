@@ -1,61 +1,76 @@
 """
 routers/chatbot.py
 
-Clean RAG-only chatbot using LangGraph.
-LoRA removed — all answers via pgvector + Groq LLM.
+Full optimized RAG pipeline:
+  1. Check response cache → return instantly if cached
+  2. Spam check
+  3. Hybrid search (vector + keyword)
+  4. Rerank results
+  5. Generate answer via Groq
+  6. Cache the answer for next time
 """
 
 from fastapi import APIRouter, HTTPException
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Optional
+import asyncio
 
 from models.schemas import ChatRequest
 from services.spam import detect_spam
-from services.embeddings import encode
+from services.reranker import rerank
 from services.llm import chat
 from services.mlflow_tracker import track_chatbot, Timer
-from db.vectors import search_similar, log_spam, get_spam_logs
-from config import LLM_MODEL
+from db.vectors import (
+    hybrid_search,
+    log_spam, get_spam_logs,
+    get_response_cache, set_response_cache,
+)
+from config import LLM_MODEL, RAG_FINAL_TOP_K
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 
 
 # ── LangGraph State ───────────────────────────────────────────
 class ChatState(TypedDict):
-    question:     str
-    context:      List[dict]
-    answer:       str
-    spam_reason:  Optional[str]
+    question:    str
+    context:     List[dict]
+    answer:      str
+    spam_reason: Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════
 # NODE 1 — Spam Check
 # ══════════════════════════════════════════════════════════════
 def spam_check_node(state: ChatState) -> ChatState:
-    """Check for spam before doing anything else."""
     reason = detect_spam(state["question"])
-    if reason:
-        log_spam(state["question"], reason)
     return {**state, "spam_reason": reason}
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 2 — RAG Retrieve
+# NODE 2 — Hybrid Search + Rerank
 # ══════════════════════════════════════════════════════════════
 def retrieve_node(state: ChatState) -> ChatState:
-    """Search pgvector for relevant content."""
-    vec  = encode(state["question"])
-    docs = search_similar(vec, k=3)
-    return {**state, "context": docs}
+    """
+    Hybrid search: vector + keyword combined.
+    Then rerank results for best relevance.
+    """
+    # Run async search in sync LangGraph node
+    loop = asyncio.get_event_loop()
+    docs = loop.run_until_complete(hybrid_search(state["question"]))
+
+    # Rerank: from top-10 → best 3
+    reranked = rerank(state["question"], docs, top_k=RAG_FINAL_TOP_K)
+
+    return {**state, "context": reranked}
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 3 — RAG Generate
+# NODE 3 — Generate
 # ══════════════════════════════════════════════════════════════
 def generate_node(state: ChatState) -> ChatState:
-    """Generate answer using Groq LLM with retrieved context."""
+    """Generate answer using Groq LLM with reranked context."""
     context_text = "\n\n".join(
-        f"Title: {d['title']}\n{d['content']}"
+        f"[Source: {d['title']} | Relevance: {d.get('rerank_score', 0):.2f}]\n{d['content']}"
         for d in state["context"]
     ) if state["context"] else "No relevant content found."
 
@@ -64,8 +79,9 @@ def generate_node(state: ChatState) -> ChatState:
             "role": "system",
             "content": (
                 "You are a helpful assistant for a Drupal website. "
-                "Answer questions based on the provided context. "
-                "If the context doesn't contain relevant information, say so."
+                "Answer questions based only on the provided context. "
+                "Mention the source title when referencing specific information. "
+                "If the context doesn't contain relevant information, say so clearly."
             )
         },
         {
@@ -77,40 +93,24 @@ def generate_node(state: ChatState) -> ChatState:
     return {**state, "answer": answer}
 
 
-# ══════════════════════════════════════════════════════════════
-# ROUTING FUNCTIONS
-# ══════════════════════════════════════════════════════════════
+# ── Routing ───────────────────────────────────────────────────
 def route_after_spam(state: ChatState) -> str:
-    """After spam check — blocked or continue to RAG."""
-    if state["spam_reason"]:
-        return "end"
-    return "retrieve"
+    return "end" if state["spam_reason"] else "retrieve"
 
 
-# ══════════════════════════════════════════════════════════════
-# BUILD LANGGRAPH
-# ══════════════════════════════════════════════════════════════
+# ── Build Graph ───────────────────────────────────────────────
 def build_graph():
     graph = StateGraph(ChatState)
-
     graph.add_node("spam_check", spam_check_node)
     graph.add_node("retrieve",   retrieve_node)
     graph.add_node("generate",   generate_node)
-
     graph.set_entry_point("spam_check")
-
     graph.add_conditional_edges(
-        "spam_check",
-        route_after_spam,
-        {
-            "end":      END,
-            "retrieve": "retrieve"
-        }
+        "spam_check", route_after_spam,
+        {"end": END, "retrieve": "retrieve"}
     )
-
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
-
     return graph.compile()
 
 
@@ -123,14 +123,28 @@ rag_graph = build_graph()
 @router.post("/ask")
 async def ask(data: ChatRequest):
     """
-    Answer questions using RAG pipeline.
+    Full optimized RAG pipeline.
 
     Flow:
-    1. Spam check
-    2. Search pgvector for relevant content
-    3. Groq LLM generates answer from context
+    1. Check response cache → instant return if found
+    2. Spam check
+    3. Hybrid search (vector + keyword) → top 10
+    4. Rerank → top 3
+    5. Groq LLM generates answer
+    6. Cache answer for 1 hour
     """
     try:
+        # ── Step 1: Check cache ───────────────────────────────
+        cached = await get_response_cache(data.question)
+        if cached:
+            return {
+                "question": data.question,
+                "answer":   cached["answer"],
+                "sources":  cached["sources"],
+                "cached":   True,
+            }
+
+        # ── Step 2-5: Run RAG pipeline ────────────────────────
         with Timer() as t:
             result = rag_graph.invoke({
                 "question":    data.question,
@@ -139,19 +153,9 @@ async def ask(data: ChatRequest):
                 "spam_reason": None,
             })
 
-        # Track in MLflow
-        track_chatbot(
-            question      = data.question,
-            answer        = result["answer"],
-            sources       = result["context"],
-            response_time = t.elapsed,
-            model         = LLM_MODEL,
-            spam_detected = bool(result["spam_reason"]),
-            spam_reason   = result["spam_reason"],
-        )
-
-        # Spam blocked
+        # ── Handle spam ───────────────────────────────────────
         if result["spam_reason"]:
+            await log_spam(data.question, result["spam_reason"])
             raise HTTPException(
                 status_code = 400,
                 detail = {
@@ -161,13 +165,35 @@ async def ask(data: ChatRequest):
                 }
             )
 
+        # Build sources list
+        sources = [
+            {
+                "node_id":      d["node_id"],
+                "title":        d["title"],
+                "rerank_score": d.get("rerank_score", 0),
+            }
+            for d in result["context"]
+        ]
+
+        # ── Step 6: Cache the answer ──────────────────────────
+        await set_response_cache(data.question, result["answer"], sources)
+
+        # ── Track in MLflow ───────────────────────────────────
+        track_chatbot(
+            question      = data.question,
+            answer        = result["answer"],
+            sources       = result["context"],
+            response_time = t.elapsed,
+            model         = LLM_MODEL,
+            spam_detected = False,
+            spam_reason   = None,
+        )
+
         return {
             "question": data.question,
             "answer":   result["answer"],
-            "sources": [
-                {"node_id": d["node_id"], "title": d["title"]}
-                for d in result["context"]
-            ],
+            "sources":  sources,
+            "cached":   False,
         }
 
     except HTTPException:
@@ -180,7 +206,15 @@ async def ask(data: ChatRequest):
 async def spam_logs():
     """View all blocked spam messages."""
     try:
-        logs = get_spam_logs(limit=100)
+        logs = await get_spam_logs(limit=100)
         return {"total": len(logs), "logs": logs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/cache/clear")
+async def clear_cache():
+    """Clear expired cache entries."""
+    from db.vectors import clean_expired_cache
+    await clean_expired_cache()
+    return {"status": "cache cleaned"}

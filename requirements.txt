@@ -2,23 +2,24 @@
 fastapi
 uvicorn[standard]
 python-dotenv
-
+ 
 # Pydantic
 pydantic
-
+ 
 # LangGraph + Groq
 langgraph
 groq
-
+ 
 # Embeddings
 sentence-transformers
-
+ 
 # Database
+asyncpg
 psycopg2-binary
 pgvector
-
+ 
 # Utils
 numpy
-
+ 
 # MLOps
 mlflow
