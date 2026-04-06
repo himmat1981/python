@@ -1,41 +1,46 @@
 """
 routers/chatbot.py
 
-Full optimized RAG pipeline:
-  1. Check response cache → return instantly if cached
-  2. Spam check
-  3. Hybrid search (vector + keyword)
-  4. Rerank results
-  5. Generate answer via Groq
-  6. Cache the answer for next time
+Full LangChain RAG pipeline orchestrated by LangGraph:
+  1. Check response cache     → return instantly if cached
+  2. Spam check               → block or continue
+  3. Intent classify          → tune search weights (factual/procedural/navigational/comparison/chitchat/off_topic)
+  4. Retrieve (LangChain)     → intent_aware_retrieve (vector + keyword + intent-weighted rerank)
+  5. Generate (LangChain)     → ChatPromptTemplate | ChatGroq | StrOutputParser
+  6. Cache the answer         → store for 1 hour
 """
+
+import asyncio
 
 from fastapi import APIRouter, HTTPException
 from langgraph.graph import StateGraph, END
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from typing import TypedDict, List, Optional
-import asyncio
 
 from models.schemas import ChatRequest
 from services.spam import detect_spam
-from services.reranker import rerank
-from services.llm import chat
+from services.retriever import intent_aware_retrieve
+from services.intent_classifier import classify_intent
+from services.llm import get_llm
 from services.mlflow_tracker import track_chatbot, Timer
 from db.vectors import (
-    hybrid_search,
     log_spam, get_spam_logs,
     get_response_cache, set_response_cache,
 )
-from config import LLM_MODEL, RAG_FINAL_TOP_K
+from config import LLM_MODEL
 
 router = APIRouter(prefix="/chatbot", tags=["chatbot"])
 
 
 # ── LangGraph State ───────────────────────────────────────────
 class ChatState(TypedDict):
-    question:    str
-    context:     List[dict]
-    answer:      str
-    spam_reason: Optional[str]
+    question:      str
+    intent:        Optional[str]
+    intent_config: Optional[dict]
+    context:       List[dict]
+    answer:        str
+    spam_reason:   Optional[str]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -47,67 +52,113 @@ def spam_check_node(state: ChatState) -> ChatState:
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 2 — Hybrid Search + Rerank
+# NODE 2 — Classify intent to tune search strategy
+# ══════════════════════════════════════════════════════════════
+def intent_node(state: ChatState) -> ChatState:
+    """
+    Classifies the query into one of:
+      factual / procedural / navigational / comparison / chitchat / off_topic
+
+    Produces an intent_config dict that drives search weight tuning in
+    the retrieve node. chitchat and off_topic skip retrieval entirely.
+    """
+    config = classify_intent(state["question"])
+    return {**state, "intent": config["intent"], "intent_config": config}
+
+
+# ══════════════════════════════════════════════════════════════
+# NODE 3 — Retrieve via intent-aware hybrid search
 # ══════════════════════════════════════════════════════════════
 def retrieve_node(state: ChatState) -> ChatState:
     """
-    Hybrid search: vector + keyword combined.
-    Then rerank results for best relevance.
+    Uses intent_aware_retrieve() instead of the generic HybridRetriever
+    so that vector/keyword weights are tuned per intent:
+
+      factual     → vector-heavy  (0.75 / 0.25)
+      procedural  → balanced      (0.55 / 0.45)
+      navigational → keyword-heavy (0.25 / 0.75)
+      comparison  → balanced + wider fetch
+
+    chitchat / off_topic skip this node via routing (context stays empty).
     """
-    # Run async search in sync LangGraph node
-    loop = asyncio.get_event_loop()
-    docs = loop.run_until_complete(hybrid_search(state["question"]))
+    docs = intent_aware_retrieve(state["question"], state["intent_config"])
 
-    # Rerank: from top-10 → best 3
-    reranked = rerank(state["question"], docs, top_k=RAG_FINAL_TOP_K)
+    context = [
+        {
+            "node_id":      doc.metadata["node_id"],
+            "title":        doc.metadata["title"],
+            "content":      doc.page_content,
+            "rerank_score": doc.metadata.get("rerank_score", 0.0),
+        }
+        for doc in docs
+    ]
+    return {**state, "context": context}
 
-    return {**state, "context": reranked}
+
+# ── LangChain RAG chain (built once at startup) ───────────────
+_rag_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        (
+            "You are a helpful assistant for a Drupal website. "
+            "Answer questions based only on the provided context. "
+            "Mention the source title when referencing specific information. "
+            "If the context doesn't contain relevant information, say so clearly."
+        ),
+    ),
+    ("human", "Context:\n{context}\n\nQuestion: {question}"),
+])
+
+_rag_chain = _rag_prompt | get_llm() | StrOutputParser()
 
 
 # ══════════════════════════════════════════════════════════════
-# NODE 3 — Generate
+# NODE 4 — Generate via LangChain LCEL chain
 # ══════════════════════════════════════════════════════════════
 def generate_node(state: ChatState) -> ChatState:
-    """Generate answer using Groq LLM with reranked context."""
+    """
+    Formats retrieved context and runs the LangChain chain:
+      ChatPromptTemplate | ChatGroq | StrOutputParser
+    """
     context_text = "\n\n".join(
         f"[Source: {d['title']} | Relevance: {d.get('rerank_score', 0):.2f}]\n{d['content']}"
         for d in state["context"]
     ) if state["context"] else "No relevant content found."
 
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful assistant for a Drupal website. "
-                "Answer questions based only on the provided context. "
-                "Mention the source title when referencing specific information. "
-                "If the context doesn't contain relevant information, say so clearly."
-            )
-        },
-        {
-            "role": "user",
-            "content": f"Context:\n{context_text}\n\nQuestion: {state['question']}"
-        }
-    ]
-    answer = chat(messages)
+    answer = _rag_chain.invoke({
+        "context":  context_text,
+        "question": state["question"],
+    })
     return {**state, "answer": answer}
 
 
 # ── Routing ───────────────────────────────────────────────────
 def route_after_spam(state: ChatState) -> str:
-    return "end" if state["spam_reason"] else "retrieve"
+    return "end" if state["spam_reason"] else "intent"
 
 
-# ── Build Graph ───────────────────────────────────────────────
+def route_after_intent(state: ChatState) -> str:
+    """Skip retrieval for chitchat / off_topic — go straight to generate."""
+    if state.get("intent_config", {}).get("skip_retrieval", False):
+        return "generate"
+    return "retrieve"
+
+
+# ── Build LangGraph ───────────────────────────────────────────
 def build_graph():
     graph = StateGraph(ChatState)
     graph.add_node("spam_check", spam_check_node)
+    graph.add_node("intent",     intent_node)
     graph.add_node("retrieve",   retrieve_node)
     graph.add_node("generate",   generate_node)
     graph.set_entry_point("spam_check")
     graph.add_conditional_edges(
         "spam_check", route_after_spam,
-        {"end": END, "retrieve": "retrieve"}
+        {"end": END, "intent": "intent"}
+    )
+    graph.add_conditional_edges(
+        "intent", route_after_intent,
+        {"retrieve": "retrieve", "generate": "generate"}
     )
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", END)
@@ -123,15 +174,12 @@ rag_graph = build_graph()
 @router.post("/ask")
 async def ask(data: ChatRequest):
     """
-    Full optimized RAG pipeline.
+    Full LangChain RAG pipeline.
 
     Flow:
     1. Check response cache → instant return if found
-    2. Spam check
-    3. Hybrid search (vector + keyword) → top 10
-    4. Rerank → top 3
-    5. Groq LLM generates answer
-    6. Cache answer for 1 hour
+    2. LangGraph runs: spam_check → retrieve → generate
+    3. Cache answer for 1 hour
     """
     try:
         # ── Step 1: Check cache ───────────────────────────────
@@ -144,28 +192,34 @@ async def ask(data: ChatRequest):
                 "cached":   True,
             }
 
-        # ── Step 2-5: Run RAG pipeline ────────────────────────
+        # ── Step 2–4: Run LangGraph pipeline ─────────────────
+        # Run in a thread executor so the event loop stays free.
+        # retrieve_node uses run_coroutine_threadsafe + future.result()
+        # which requires it to run from a worker thread, not the event
+        # loop thread — otherwise it deadlocks.
+        loop = asyncio.get_running_loop()
         with Timer() as t:
-            result = rag_graph.invoke({
-                "question":    data.question,
-                "context":     [],
-                "answer":      "",
-                "spam_reason": None,
+            result = await loop.run_in_executor(None, rag_graph.invoke, {
+                "question":      data.question,
+                "intent":        None,
+                "intent_config": None,
+                "context":       [],
+                "answer":        "",
+                "spam_reason":   None,
             })
 
         # ── Handle spam ───────────────────────────────────────
         if result["spam_reason"]:
             await log_spam(data.question, result["spam_reason"])
             raise HTTPException(
-                status_code = 400,
-                detail = {
+                status_code=400,
+                detail={
                     "error":   "spam_detected",
                     "reason":  result["spam_reason"],
                     "message": "Your message was flagged as spam."
                 }
             )
 
-        # Build sources list
         sources = [
             {
                 "node_id":      d["node_id"],
@@ -175,22 +229,16 @@ async def ask(data: ChatRequest):
             for d in result["context"]
         ]
 
-        # ── Step 6: Cache the answer ──────────────────────────
+        # ── Step 5: Cache the answer ──────────────────────────
         await set_response_cache(data.question, result["answer"], sources)
 
-        # ── Track in MLflow ───────────────────────────────────
-        track_chatbot(
-            question      = data.question,
-            answer        = result["answer"],
-            sources       = result["context"],
-            response_time = t.elapsed,
-            model         = LLM_MODEL,
-            spam_detected = False,
-            spam_reason   = None,
-        )
+        # ── Track in MLflow (background — don't block response) ──
+        loop.run_in_executor(None, track_chatbot, data.question,
+            result["answer"], result["context"], t.elapsed, LLM_MODEL, False, None)
 
         return {
             "question": data.question,
+            "intent":   result.get("intent"),
             "answer":   result["answer"],
             "sources":  sources,
             "cached":   False,

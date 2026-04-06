@@ -39,6 +39,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             export AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
+            export GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
 
             cd /home/ec2-user/vector-app
 

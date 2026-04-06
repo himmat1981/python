@@ -26,12 +26,12 @@ REPEAT_CHAR_LIMIT   = int(os.getenv("REPEAT_CHAR_LIMIT", "10"))
 GIBBERISH_THRESHOLD = float(os.getenv("GIBBERISH_THRESHOLD", "0.15"))
 
 # ── Chunking ──────────────────────────────────────────────────
-CHUNK_SIZE    = int(os.getenv("CHUNK_SIZE", "300"))    # words per chunk
-CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "50"))  # overlap between chunks
+CHUNK_SIZE    = int(os.getenv("CHUNK_SIZE", "1000"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "200"))
 
 # ── RAG ───────────────────────────────────────────────────────
-RAG_TOP_K        = int(os.getenv("RAG_TOP_K", "10"))   # fetch top 10 for reranking
-RAG_FINAL_TOP_K  = int(os.getenv("RAG_FINAL_TOP_K", "3"))  # return top 3 after rerank
+RAG_TOP_K       = int(os.getenv("RAG_TOP_K", "10"))
+RAG_FINAL_TOP_K = int(os.getenv("RAG_FINAL_TOP_K", "3"))
 
 # ── Response Cache ────────────────────────────────────────────
-CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))  # 1 hour
+CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))

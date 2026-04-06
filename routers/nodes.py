@@ -14,7 +14,7 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 
 
 @router.post("/store", response_model=StoreResponse)
-async def store_node(data: NodeData):
+async def handle_store_node(data: NodeData):
     """
     Store a Drupal node with smart chunking.
 
@@ -26,10 +26,7 @@ async def store_node(data: NodeData):
     Called by Drupal hook_node_insert / hook_node_update.
     """
     try:
-        # Split into chunks
         chunks = chunk_node(data.node_id, data.title, data.content)
-
-        # Store all chunks with embeddings
         await store_node_chunks(chunks)
 
         return StoreResponse(

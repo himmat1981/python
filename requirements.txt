@@ -6,16 +6,24 @@ python-dotenv
 # Pydantic
 pydantic
  
-# LangGraph + Groq
+# LangGraph + Groq (existing)
 langgraph
 groq
+
+# LangChain Groq integration
+langchain-groq
  
-# Embeddings
+# LangChain — for node/store chunking + embedding + pgvector
+langchain-core
+langchain-text-splitters
+langchain-huggingface
+langchain-postgres
 sentence-transformers
  
 # Database
-asyncpg
 psycopg2-binary
+asyncpg
+psycopg[binary]          # required by langchain-postgres
 pgvector
  
 # Utils

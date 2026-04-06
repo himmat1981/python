@@ -1,3 +1,6 @@
+from langchain_huggingface import HuggingFacePipeline
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 import threading
 
@@ -5,42 +8,52 @@ import threading
 _sum_lock = threading.Lock()
 _mod_lock = threading.Lock()
 
-# ── Model instances ────────────────────────────────────────────
-_tokenizer  = None
-_sum_model  = None
-_moderator  = None
+# ── Chain / model instances ────────────────────────────────────
+_sum_chain = None
+_moderator = None
 
 
-def get_summarizer():
+def get_summarizer_chain():
     """
-    Lazy load summarization model.
-    Loaded only when first request comes in — not at startup.
-    This prevents uvicorn restart loop caused by heavy model loading.
+    Lazy-load the summarization model and build a LangChain LCEL chain:
+      PromptTemplate | HuggingFacePipeline | StrOutputParser
+    Loaded only on first request to avoid blocking uvicorn startup.
     """
-    global _tokenizer, _sum_model
-    if _tokenizer is None:
+    global _sum_chain
+    if _sum_chain is None:
         with _sum_lock:
-            if _tokenizer is None:  # double check inside lock
+            if _sum_chain is None:
                 print("Loading summarization model...")
-                _tokenizer = AutoTokenizer.from_pretrained(
-                    "Falconsai/text_summarization"
+                tokenizer = AutoTokenizer.from_pretrained("Falconsai/text_summarization")
+                model = AutoModelForSeq2SeqLM.from_pretrained("Falconsai/text_summarization")
+
+                hf_pipe = pipeline(
+                    "text2text-generation",
+                    model=model,
+                    tokenizer=tokenizer,
+                    max_length=120,
+                    min_length=30,
+                    length_penalty=2.0,
+                    num_beams=4,
+                    early_stopping=True,
                 )
-                _sum_model = AutoModelForSeq2SeqLM.from_pretrained(
-                    "Falconsai/text_summarization"
-                )
-                print("Summarization model loaded!")
-    return _tokenizer, _sum_model
+
+                llm = HuggingFacePipeline(pipeline=hf_pipe)
+                prompt = PromptTemplate.from_template("summarize: {text}")
+                _sum_chain = prompt | llm | StrOutputParser()
+                print("Summarization chain ready!")
+    return _sum_chain
 
 
 def get_moderator():
     """
-    Lazy load moderation model.
+    Lazy-load moderation model.
     Loaded only when first request comes in — not at startup.
     """
     global _moderator
     if _moderator is None:
         with _mod_lock:
-            if _moderator is None:  # double check inside lock
+            if _moderator is None:
                 print("Loading moderation model...")
                 _moderator = pipeline(
                     "text-classification",
@@ -52,26 +65,8 @@ def get_moderator():
 
 def summarize_text(text: str) -> str:
     try:
-        tokenizer, model = get_summarizer()
-
-        inputs = tokenizer(
-            "summarize: " + text,
-            return_tensors = "pt",
-            max_length     = 512,
-            truncation     = True,
-        )
-
-        outputs = model.generate(
-            inputs["input_ids"],
-            max_length     = 120,
-            min_length     = 30,
-            length_penalty = 2.0,
-            num_beams      = 4,
-            early_stopping = True,
-        )
-
-        return tokenizer.decode(outputs[0], skip_special_tokens=True)
-
+        chain = get_summarizer_chain()
+        return chain.invoke({"text": text})
     except Exception as e:
         return f"Error: {str(e)}"
 

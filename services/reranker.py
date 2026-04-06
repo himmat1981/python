@@ -55,14 +55,22 @@ def _keyword_overlap_score(query: str, content: str) -> float:
     return len(matches) / len(query_words)
 
 
-def rerank(query: str, results: List[dict], top_k: int = 3) -> List[dict]:
+def rerank(
+    query: str,
+    results: List[dict],
+    top_k: int = 3,
+    vector_weight: float = 0.6,
+    keyword_weight: float = 0.4,
+) -> List[dict]:
     """
     Rerank search results using combined score.
 
     Args:
-        query:   Original user question
-        results: List of dicts with 'content', 'similarity', etc.
-        top_k:   How many results to return after reranking
+        query:          Original user question
+        results:        List of dicts with 'content', 'similarity', etc.
+        top_k:          How many results to return after reranking
+        vector_weight:  Weight for vector similarity (intent-driven)
+        keyword_weight: Weight for keyword overlap  (intent-driven)
 
     Returns:
         Top-k results sorted by combined relevance score
@@ -76,8 +84,8 @@ def rerank(query: str, results: List[dict], top_k: int = 3) -> List[dict]:
         similarity = float(result.get("similarity", 0.0))
         keyword    = _keyword_overlap_score(query, content)
 
-        # Combined score: 60% vector similarity + 40% keyword overlap
-        combined_score = (0.6 * similarity) + (0.4 * keyword)
+        # Combined score weighted by intent
+        combined_score = (vector_weight * similarity) + (keyword_weight * keyword)
 
         scored.append({
             **result,

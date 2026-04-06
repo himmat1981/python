@@ -11,12 +11,13 @@ New features vs old file:
   - clean_expired_cache()   → remove old cache entries
 """
 
+import asyncio
 import json
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from db.connection import get_pool
-from services.embeddings import encode
+from services.embeddings import encode, get_embedder
 from config import CACHE_TTL_SECONDS, RAG_TOP_K
 
 
@@ -40,14 +41,16 @@ async def store_node_chunks(chunks: List[dict]):
             chunks[0]["node_id"]
         )
 
-        # Insert all chunks
-        for chunk in chunks:
-            embedding = encode(chunk["content"])
-            await conn.execute("""
-                INSERT INTO node_chunks
-                    (node_id, title, chunk_index, chunk_total, content, embedding)
-                VALUES ($1, $2, $3, $4, $5, $6::vector)
-            """,
+        # Batch-embed in a thread executor — embed_documents() is CPU-bound
+        # and would block the event loop if called directly in async code.
+        texts      = [chunk["content"] for chunk in chunks]
+        loop       = asyncio.get_running_loop()
+        embeddings = await loop.run_in_executor(
+            None, get_embedder().embed_documents, texts
+        )
+
+        records = [
+            (
                 chunk["node_id"],
                 chunk["title"],
                 chunk["chunk_index"],
@@ -55,6 +58,13 @@ async def store_node_chunks(chunks: List[dict]):
                 chunk["content"],
                 str(embedding),
             )
+            for chunk, embedding in zip(chunks, embeddings)
+        ]
+        await conn.executemany("""
+            INSERT INTO node_chunks
+                (node_id, title, chunk_index, chunk_total, content, embedding)
+            VALUES ($1, $2, $3, $4, $5, $6::vector)
+        """, records)
 
 
 async def hybrid_search(query: str, k: int = RAG_TOP_K) -> List[dict]:
@@ -78,32 +88,36 @@ async def hybrid_search(query: str, k: int = RAG_TOP_K) -> List[dict]:
     query_vector = encode(query)
 
     async with pool.acquire() as conn:
+        async with conn.transaction():
 
-        # ── Vector search ─────────────────────────────────────
-        vector_rows = await conn.fetch("""
-            SELECT
-                node_id, title, content, chunk_index,
-                1 - (embedding <=> $1::vector) AS similarity,
-                'vector' AS source
-            FROM node_chunks
-            ORDER BY embedding <=> $1::vector
-            LIMIT $2;
-        """, str(query_vector), k)
+            # Increase ivfflat probe count for better recall (default is 1)
+            await conn.execute("SET LOCAL ivfflat.probes = 10")
 
-        # ── Keyword search (PostgreSQL full-text) ─────────────
-        keyword_rows = await conn.fetch("""
-            SELECT
-                node_id, title, content, chunk_index,
-                ts_rank(
-                    to_tsvector('english', content),
-                    plainto_tsquery('english', $1)
-                ) AS similarity,
-                'keyword' AS source
-            FROM node_chunks
-            WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1)
-            ORDER BY similarity DESC
-            LIMIT $2;
-        """, query, k)
+            # ── Vector search ─────────────────────────────────────
+            vector_rows = await conn.fetch("""
+                SELECT
+                    node_id, title, content, chunk_index,
+                    1 - (embedding <=> $1::vector) AS similarity,
+                    'vector' AS source
+                FROM node_chunks
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2;
+            """, str(query_vector), k)
+
+            # ── Keyword search (PostgreSQL full-text) ─────────────
+            keyword_rows = await conn.fetch("""
+                SELECT
+                    node_id, title, content, chunk_index,
+                    ts_rank(
+                        to_tsvector('english', content),
+                        plainto_tsquery('english', $1)
+                    ) AS similarity,
+                    'keyword' AS source
+                FROM node_chunks
+                WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1)
+                ORDER BY similarity DESC
+                LIMIT $2;
+            """, query, k)
 
     # ── Merge and deduplicate ──────────────────────────────────
     seen    = {}
@@ -174,7 +188,7 @@ async def set_response_cache(question: str, answer: str, sources: list):
     """
     pool       = get_pool()
     key        = _make_cache_key(question)
-    expires_at = datetime.utcnow() + timedelta(seconds=CACHE_TTL_SECONDS)
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=CACHE_TTL_SECONDS)
 
     async with pool.acquire() as conn:
         await conn.execute("""

@@ -5,15 +5,23 @@ Async connection pool using asyncpg.
 Includes all tables: node_vectors, chunks, response_cache, spam_log, seo_cache.
 """
 
+import asyncio
 import asyncpg
 from config import DATABASE_URL
 
 _pool: asyncpg.Pool = None
+_main_loop: asyncio.AbstractEventLoop = None
+
+
+def get_main_loop() -> asyncio.AbstractEventLoop:
+    """Return the main event loop captured at startup."""
+    return _main_loop
 
 
 async def init_pool():
     """Initialize async connection pool at app startup."""
-    global _pool
+    global _pool, _main_loop
+    _main_loop = asyncio.get_running_loop()
     if _pool is None:
         db_url = DATABASE_URL.replace("postgresql://", "postgres://")
         _pool = await asyncpg.create_pool(
@@ -78,6 +86,12 @@ async def ensure_tables():
             CREATE INDEX IF NOT EXISTS idx_chunks_embedding
             ON node_chunks USING ivfflat (embedding vector_cosine_ops)
             WITH (lists = 100);
+        """)
+
+        # Index for fast full-text keyword search on chunks
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chunks_content_fts
+            ON node_chunks USING gin(to_tsvector('english', content));
         """)
 
         # ── Response cache (NEW — cache chatbot answers) ─────────────

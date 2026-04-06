@@ -1,25 +1,29 @@
 """
 services/embeddings.py
 
-Lightweight embedding using ONNX backend.
-No torch — much faster startup, lower memory usage.
+LangChain HuggingFaceEmbeddings for query encoding.
+Consistent with vectorstore.py — same model, same LangChain wrapper.
 """
 
-from sentence_transformers import SentenceTransformer
+from langchain_huggingface import HuggingFaceEmbeddings
 from config import EMBED_MODEL
 
 # Singleton — loaded once at startup, reused for every request
 _embedder = None
 
-def get_embedder() -> SentenceTransformer:
-    """Return the embedding model, loading it if not already loaded."""
+
+def get_embedder() -> HuggingFaceEmbeddings:
+    """Return the LangChain HuggingFaceEmbeddings model, loading it if needed."""
     global _embedder
     if _embedder is None:
-        # ONNX backend = no torch dependency, ~10x faster cold start
-        _embedder = SentenceTransformer(EMBED_MODEL)
+        _embedder = HuggingFaceEmbeddings(
+            model_name    = EMBED_MODEL,
+            model_kwargs  = {"device": "cpu"},
+            encode_kwargs = {"normalize_embeddings": True},
+        )
     return _embedder
 
 
 def encode(text: str) -> list:
-    """Convert text to a vector embedding."""
-    return get_embedder().encode(text).tolist()
+    """Convert text to a vector embedding using LangChain HuggingFaceEmbeddings."""
+    return get_embedder().embed_query(text)
