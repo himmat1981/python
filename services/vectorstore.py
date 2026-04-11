@@ -9,12 +9,15 @@ Step 1: LangChain handles node/store only.
 Other features (search, hybrid) will be added in next steps.
 """
 
+import logging
 from langchain_postgres.vectorstores import PGVector
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from typing import List
 from config import DATABASE_URL, EMBED_MODEL, CHUNK_SIZE, CHUNK_OVERLAP
+
+logger = logging.getLogger(__name__)
 
 # ── Singletons — loaded once, reused forever ──────────────────
 _embeddings  = None
@@ -25,13 +28,13 @@ def get_embeddings() -> HuggingFaceEmbeddings:
     """Load embedding model once at first call."""
     global _embeddings
     if _embeddings is None:
-        print("Loading embedding model...")
+        logger.info("Loading embedding model: %s", EMBED_MODEL)
         _embeddings = HuggingFaceEmbeddings(
             model_name    = EMBED_MODEL,
             model_kwargs  = {"device": "cpu"},
             encode_kwargs = {"normalize_embeddings": True},
         )
-        print("✅ Embedding model ready")
+        logger.info("Embedding model ready")
     return _embeddings
 
 
@@ -55,7 +58,7 @@ def get_vectorstore() -> PGVector:
             connection      = db_url,
             use_jsonb       = True,              # better metadata filtering
         )
-        print("✅ PGVector store connected")
+        logger.info("PGVector store connected (collection=drupal_chunks)")
     return _vectorstore
 
 
@@ -92,7 +95,10 @@ def store_node(node_id: int, title: str, content: str) -> int:
     )
 
     # Store all chunks — LangChain embeds + saves in one call
+    logger.info(
+        "Storing node %d (%r): %d chunks (size=%d, overlap=%d)",
+        node_id, title, len(chunks), CHUNK_SIZE, CHUNK_OVERLAP,
+    )
     vectorstore.add_documents(chunks)
-
-    print(f"✅ Node {node_id} stored as {len(chunks)} chunks")
+    logger.info("Node %d stored successfully (%d chunks)", node_id, len(chunks))
     return len(chunks)

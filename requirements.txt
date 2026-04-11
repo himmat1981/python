@@ -12,6 +12,9 @@ groq
 
 # LangChain Groq integration
 langchain-groq
+
+# LangChain Anthropic (Claude) integration
+langchain-anthropic
  
 # LangChain — for node/store chunking + embedding + pgvector
 langchain-core

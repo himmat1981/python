@@ -90,8 +90,8 @@ async def hybrid_search(query: str, k: int = RAG_TOP_K) -> List[dict]:
     async with pool.acquire() as conn:
         async with conn.transaction():
 
-            # Increase ivfflat probe count for better recall (default is 1)
-            await conn.execute("SET LOCAL ivfflat.probes = 10")
+            # Increase HNSW search candidate list for better recall (default is 40)
+            await conn.execute("SET LOCAL hnsw.ef_search = 100")
 
             # ── Vector search ─────────────────────────────────────
             vector_rows = await conn.fetch("""

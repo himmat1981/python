@@ -8,9 +8,15 @@ App startup:
 4. Register all routers
 """
 
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 from db.connection import init_pool, close_pool, ensure_tables
 from routers.nodes import router as nodes_router

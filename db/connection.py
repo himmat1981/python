@@ -81,11 +81,13 @@ async def ensure_tables():
             );
         """)
 
-        # Index for fast similarity search on chunks
+        # HNSW index for fast approximate nearest-neighbour search.
+        # m=16: connections per layer (higher → better recall, more RAM)
+        # ef_construction=64: build-time candidate list size (higher → better quality index)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-            ON node_chunks USING ivfflat (embedding vector_cosine_ops)
-            WITH (lists = 100);
+            ON node_chunks USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
         """)
 
         # Index for fast full-text keyword search on chunks

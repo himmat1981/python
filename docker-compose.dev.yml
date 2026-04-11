@@ -25,10 +25,9 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env   # ✅ FIXED
+      - .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@pgvector-db:5432/vectors
-      LLM_MODEL: llama-3.3-70b-versatile
     volumes:
       - .:/app
       - lora_data:/app/lora_adapter
