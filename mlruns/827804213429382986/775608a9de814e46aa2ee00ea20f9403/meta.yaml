@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/775608a9de814e46aa2ee00ea20f9403/artifacts
+end_time: 1775229895170
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 775608a9de814e46aa2ee00ea20f9403
+run_name: bemused-shad-193
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775229895147
+status: 3
+tags: []
+user_id: root

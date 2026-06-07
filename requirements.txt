@@ -1,11 +1,12 @@
 # Server
 fastapi
 uvicorn[standard]
+python-multipart
 python-dotenv
- 
+
 # Pydantic
 pydantic
- 
+
 # LangGraph + Groq (existing)
 langgraph
 groq
@@ -15,22 +16,26 @@ langchain-groq
 
 # LangChain Anthropic (Claude) integration
 langchain-anthropic
- 
+
 # LangChain — for node/store chunking + embedding + pgvector
 langchain-core
 langchain-text-splitters
 langchain-huggingface
 langchain-postgres
 sentence-transformers
- 
+
 # Database
 psycopg2-binary
 asyncpg
-psycopg[binary]          # required by langchain-postgres
+psycopg[binary]
 pgvector
- 
+
 # Utils
 numpy
- 
+
+# Document parsing (PDF, DOCX, TXT uploads)
+pypdf
+python-docx
+
 # MLOps
 mlflow

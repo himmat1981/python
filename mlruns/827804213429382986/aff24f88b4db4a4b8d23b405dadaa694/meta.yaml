@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/aff24f88b4db4a4b8d23b405dadaa694/artifacts
+end_time: 1775725274749
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: aff24f88b4db4a4b8d23b405dadaa694
+run_name: worried-snail-52
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775725274724
+status: 3
+tags: []
+user_id: root

@@ -13,13 +13,13 @@ which accepts an intent config dict (from intent_classifier) to tune weights.
 """
 
 import asyncio
-from typing import List
+from typing import List, Optional
 
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 
-from db.vectors import hybrid_search
+from db.vectors import hybrid_search, document_hybrid_search
 from db.connection import get_main_loop
 from services.reranker import rerank
 from config import RAG_FINAL_TOP_K, RAG_TOP_K
@@ -72,17 +72,27 @@ def get_retriever() -> HybridRetriever:
     return _retriever
 
 
-def intent_aware_retrieve(query: str, intent_config: dict) -> List[Document]:
+def intent_aware_retrieve(
+    query: str,
+    intent_config: dict,
+    document_id: Optional[str] = None,
+) -> List[Document]:
     """
     Intent-aware retrieval for the LangGraph pipeline.
 
     Unlike the generic HybridRetriever, this uses the intent_config produced
     by intent_classifier.classify_intent() to tune reranking weights and top_k.
 
+    When document_id is provided the function merges results from both the
+    site knowledge base (node_chunks) and the uploaded document
+    (document_chunks), then reranks everything together.  Sources are tagged
+    with a 'source_type' metadata field ('knowledge_base' or 'document').
+
     Args:
         query:         User question
         intent_config: Dict from classify_intent() — must contain:
                          vector_weight, keyword_weight, top_k_boost
+        document_id:   Optional UUID from POST /documents/upload
 
     Returns:
         List[Document] — same format as HybridRetriever for drop-in use
@@ -93,10 +103,23 @@ def intent_aware_retrieve(query: str, intent_config: dict) -> List[Document]:
     fetch_k        = RAG_TOP_K + top_k_boost
 
     main_loop = get_main_loop()
-    future    = asyncio.run_coroutine_threadsafe(
+
+    # ── Knowledge-base search (always runs) ───────────────────
+    kb_future = asyncio.run_coroutine_threadsafe(
         hybrid_search(query, k=fetch_k), main_loop
     )
-    raw_docs = future.result(timeout=30)
+    raw_docs = kb_future.result(timeout=30)
+    for r in raw_docs:
+        r["source_type"] = "knowledge_base"
+
+    # ── Document search (only when a document_id is given) ────
+    if document_id:
+        doc_future = asyncio.run_coroutine_threadsafe(
+            document_hybrid_search(query, document_id, k=fetch_k), main_loop
+        )
+        doc_docs = doc_future.result(timeout=30)
+        # document_hybrid_search() already sets source_type='document'
+        raw_docs = raw_docs + doc_docs
 
     reranked = rerank(
         query,
@@ -110,9 +133,10 @@ def intent_aware_retrieve(query: str, intent_config: dict) -> List[Document]:
         Document(
             page_content=d["content"],
             metadata={
-                "node_id":      d["node_id"],
-                "title":        d["title"],
+                "node_id":      d.get("node_id", 0),
+                "title":        d.get("title", "Uploaded Document"),
                 "rerank_score": d.get("rerank_score", 0.0),
+                "source_type":  d.get("source_type", "knowledge_base"),
             },
         )
         for d in reranked

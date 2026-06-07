@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/a4ea33a285d948e89aa928801e02cff4/artifacts
+end_time: 1779262901949
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: a4ea33a285d948e89aa928801e02cff4
+run_name: orderly-doe-430
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779262901867
+status: 3
+tags: []
+user_id: root

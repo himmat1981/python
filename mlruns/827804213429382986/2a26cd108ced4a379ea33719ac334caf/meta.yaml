@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/2a26cd108ced4a379ea33719ac334caf/artifacts
+end_time: 1775229742416
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 2a26cd108ced4a379ea33719ac334caf
+run_name: unique-sheep-325
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775229742388
+status: 3
+tags: []
+user_id: root

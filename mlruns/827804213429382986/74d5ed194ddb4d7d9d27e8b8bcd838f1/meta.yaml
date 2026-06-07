@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/74d5ed194ddb4d7d9d27e8b8bcd838f1/artifacts
+end_time: 1775227789812
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 74d5ed194ddb4d7d9d27e8b8bcd838f1
+run_name: judicious-whale-221
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775227789778
+status: 3
+tags: []
+user_id: root

@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/aa2b6264f1fd44d9b364e156e52d8619/artifacts
+end_time: 1775478001468
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: aa2b6264f1fd44d9b364e156e52d8619
+run_name: youthful-shark-85
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775478001448
+status: 3
+tags: []
+user_id: root

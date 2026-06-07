@@ -148,4 +148,93 @@ async def ensure_tables():
             );
         """)
 
+        # ── Products (ecommerce) ───────────────────────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                id          SERIAL PRIMARY KEY,
+                product_id  INTEGER UNIQUE NOT NULL,
+                title       TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                price       DECIMAL(10,2) DEFAULT 0,
+                category    TEXT DEFAULT '',
+                sku         TEXT DEFAULT '',
+                embedding   vector(384),
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # HNSW index for fast product similarity search
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_products_embedding
+            ON products USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
+        """)
+
+        # ── User interactions (ecommerce) ──────────────────────────────
+        # Tracks views, clicks, add-to-cart, purchases per user+product
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_interactions (
+                id               SERIAL PRIMARY KEY,
+                user_id          INTEGER NOT NULL,
+                product_id       INTEGER NOT NULL,
+                interaction_type TEXT NOT NULL,
+                score            DECIMAL(5,2) DEFAULT 1.0,
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_user_interactions_user
+            ON user_interactions (user_id, created_at DESC);
+        """)
+
+        # ── Recommendation cache (ecommerce) ──────────────────────────
+        # Caches per-user recommendations for 30 minutes
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS recommendation_cache (
+                id              SERIAL PRIMARY KEY,
+                user_id         INTEGER UNIQUE NOT NULL,
+                recommendations TEXT NOT NULL,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at      TIMESTAMP NOT NULL
+            );
+        """)
+
+        # ── Document chunks (uploaded files) ───────────────────────
+        # Stores chunks from user-uploaded documents (PDF, DOCX, TXT).
+        # document_id is a UUID returned to the caller on upload.
+        # Rows are auto-cleaned after 24 hours via clean_expired_documents().
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS document_chunks (
+                id           SERIAL PRIMARY KEY,
+                document_id  TEXT NOT NULL,
+                filename     TEXT NOT NULL,
+                chunk_index  INTEGER NOT NULL,
+                chunk_total  INTEGER NOT NULL,
+                content      TEXT,
+                embedding    vector(384),
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # HNSW index for fast ANN search on uploaded document chunks
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding
+            ON document_chunks USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
+        """)
+
+        # Full-text search index on document chunk content
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_document_chunks_fts
+            ON document_chunks USING gin(to_tsvector('english', content));
+        """)
+
+        # Lookup by document_id (used in search + delete)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_document_chunks_doc_id
+            ON document_chunks (document_id);
+        """)
+
     print("✅ DB tables verified")

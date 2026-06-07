@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/7948253ac5a74099ae46e6fbb20dc128/artifacts
+end_time: 1775217085661
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 7948253ac5a74099ae46e6fbb20dc128
+run_name: nimble-hawk-753
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775217085638
+status: 3
+tags: []
+user_id: root

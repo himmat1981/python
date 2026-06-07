@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/ac9819ac1cb647ada48f247b01ea2027/artifacts
+end_time: 1775934049608
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: ac9819ac1cb647ada48f247b01ea2027
+run_name: judicious-sponge-777
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775934049585
+status: 3
+tags: []
+user_id: root

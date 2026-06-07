@@ -12,6 +12,7 @@ class NodeData(BaseModel):
 class ChatRequest(BaseModel):
     """Request model for chatbot endpoint."""
     question: str
+    document_id: Optional[str] = None  # UUID from POST /documents/upload
 
     @field_validator("question")
     def must_not_be_empty(cls, v):
@@ -59,3 +60,35 @@ class TextRequest(BaseModel):
 class GovernanceRequest(BaseModel):
     title: str
     body: str
+
+
+# ── Ecommerce ──────────────────────────────────────────────────────────────
+
+class ProductData(BaseModel):
+    """Request model for storing a Drupal product node."""
+    product_id:  int
+    title:       str
+    description: str = ""
+    price:       float = 0.0
+    category:    str = ""
+    sku:         str = ""
+
+
+class ProductStoreResponse(BaseModel):
+    """Response model for product store endpoint."""
+    status:     str
+    product_id: int
+
+
+class LoginRecommendRequest(BaseModel):
+    """Request model for login-triggered recommendations."""
+    user_id: int
+    limit:   int = 10
+
+
+class RecommendResponse(BaseModel):
+    """Response model for recommendation endpoints."""
+    user_id:  int
+    products: List[dict]
+    strategy: str
+    count:    int

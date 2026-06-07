@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/b86892a6f398407eb06e61b2ba3c279c/artifacts
+end_time: 1775479354938
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: b86892a6f398407eb06e61b2ba3c279c
+run_name: suave-zebra-903
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775479354913
+status: 3
+tags: []
+user_id: root

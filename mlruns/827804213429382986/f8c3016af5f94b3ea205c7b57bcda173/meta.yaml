@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/f8c3016af5f94b3ea205c7b57bcda173/artifacts
+end_time: 1775477621648
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: f8c3016af5f94b3ea205c7b57bcda173
+run_name: bald-jay-626
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775477621601
+status: 3
+tags: []
+user_id: root

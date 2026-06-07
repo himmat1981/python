@@ -21,9 +21,12 @@ logging.basicConfig(
 from db.connection import init_pool, close_pool, ensure_tables
 from routers.nodes import router as nodes_router
 from routers.chatbot import router as chatbot_router
+from routers.documents import router as documents_router
 from routers.seo import router as seo_router
 from routers.nlp import router as nlp_router
 from routers import governance
+from routers.products import router as products_router
+from routers.recommendations import router as recommendations_router
 
 
 # ── Lifespan ──────────────────────────────────────────────────
@@ -76,9 +79,12 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────
 app.include_router(nodes_router)
 app.include_router(chatbot_router)
+app.include_router(documents_router)
 app.include_router(seo_router)
 app.include_router(nlp_router)
 app.include_router(governance.router)
+app.include_router(products_router)
+app.include_router(recommendations_router)
 
 
 # ── Health check ──────────────────────────────────────────────

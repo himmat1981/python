@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/b51993a72c5247b391a6f6b04e78bde2/artifacts
+end_time: 1774727644299
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: b51993a72c5247b391a6f6b04e78bde2
+run_name: nervous-seal-573
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1774727644279
+status: 3
+tags: []
+user_id: root

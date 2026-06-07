@@ -249,6 +249,136 @@ async def search_similar_content(content: str, top_k: int = 3) -> List[dict]:
 
 
 # ══════════════════════════════════════════════════════════════
+# DOCUMENT CHUNKS — uploaded file storage and search
+# ══════════════════════════════════════════════════════════════
+
+async def store_document_chunks(document_id: str, filename: str, chunks: List[dict]):
+    """
+    Store all chunks of an uploaded document with their embeddings.
+
+    Each chunk dict must have:
+        content, chunk_index
+    chunk_total is derived from len(chunks).
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        # Replace any existing chunks for this document_id
+        await conn.execute(
+            "DELETE FROM document_chunks WHERE document_id = $1",
+            document_id
+        )
+
+        texts      = [chunk["content"] for chunk in chunks]
+        loop       = asyncio.get_running_loop()
+        embeddings = await loop.run_in_executor(
+            None, get_embedder().embed_documents, texts
+        )
+
+        chunk_total = len(chunks)
+        records = [
+            (
+                document_id,
+                filename,
+                chunk["chunk_index"],
+                chunk_total,
+                chunk["content"],
+                str(embedding),
+            )
+            for chunk, embedding in zip(chunks, embeddings)
+        ]
+        await conn.executemany("""
+            INSERT INTO document_chunks
+                (document_id, filename, chunk_index, chunk_total, content, embedding)
+            VALUES ($1, $2, $3, $4, $5, $6::vector)
+        """, records)
+
+
+async def document_hybrid_search(query: str, document_id: str, k: int = RAG_TOP_K) -> List[dict]:
+    """
+    Hybrid search scoped to a single uploaded document.
+
+    Combines vector similarity and keyword full-text search,
+    same strategy as hybrid_search() for node_chunks.
+    Results are tagged with source_type='document' and include filename.
+    """
+    pool         = get_pool()
+    query_vector = encode(query)
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL hnsw.ef_search = 100")
+
+            vector_rows = await conn.fetch("""
+                SELECT
+                    document_id, filename, content, chunk_index,
+                    1 - (embedding <=> $1::vector) AS similarity,
+                    'vector' AS source
+                FROM document_chunks
+                WHERE document_id = $2
+                ORDER BY embedding <=> $1::vector
+                LIMIT $3;
+            """, str(query_vector), document_id, k)
+
+            keyword_rows = await conn.fetch("""
+                SELECT
+                    document_id, filename, content, chunk_index,
+                    ts_rank(
+                        to_tsvector('english', content),
+                        plainto_tsquery('english', $1)
+                    ) AS similarity,
+                    'keyword' AS source
+                FROM document_chunks
+                WHERE document_id = $2
+                  AND to_tsvector('english', content) @@ plainto_tsquery('english', $1)
+                ORDER BY similarity DESC
+                LIMIT $3;
+            """, query, document_id, k)
+
+    # Merge and deduplicate
+    seen    = {}
+    results = []
+
+    for row in list(vector_rows) + list(keyword_rows):
+        key = f"{row['document_id']}_{row['chunk_index']}"
+        r   = dict(row)
+        # Normalise to the same shape hybrid_search() returns
+        r["node_id"]     = 0
+        r["title"]       = row["filename"]
+        r["source_type"] = "document"
+
+        if key not in seen:
+            seen[key] = r
+            results.append(r)
+        else:
+            if r["similarity"] > seen[key]["similarity"]:
+                seen[key]["similarity"] = r["similarity"]
+                seen[key]["source"]     = "hybrid"
+
+    return results
+
+
+async def delete_document(document_id: str):
+    """Delete all chunks for an uploaded document."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM document_chunks WHERE document_id = $1",
+            document_id
+        )
+
+
+async def clean_expired_documents(max_age_hours: int = 24):
+    """Delete document chunks older than max_age_hours. Call periodically."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        deleted = await conn.execute("""
+            DELETE FROM document_chunks
+            WHERE created_at < NOW() - ($1 * INTERVAL '1 hour');
+        """, max_age_hours)
+        print(f"Document cleanup: {deleted}")
+
+
+# ══════════════════════════════════════════════════════════════
 # SPAM LOG
 # ══════════════════════════════════════════════════════════════
 

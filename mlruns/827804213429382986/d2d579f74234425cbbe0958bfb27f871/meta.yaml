@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/d2d579f74234425cbbe0958bfb27f871/artifacts
+end_time: 1775551305499
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: d2d579f74234425cbbe0958bfb27f871
+run_name: indecisive-worm-997
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775551305439
+status: 3
+tags: []
+user_id: root

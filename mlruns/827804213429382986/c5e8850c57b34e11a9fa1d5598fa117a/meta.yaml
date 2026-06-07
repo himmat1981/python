@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/c5e8850c57b34e11a9fa1d5598fa117a/artifacts
+end_time: 1775215794694
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: c5e8850c57b34e11a9fa1d5598fa117a
+run_name: skittish-mule-393
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775215794647
+status: 3
+tags: []
+user_id: root

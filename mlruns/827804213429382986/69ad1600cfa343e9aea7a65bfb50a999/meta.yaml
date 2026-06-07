@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/69ad1600cfa343e9aea7a65bfb50a999/artifacts
+end_time: 1779262930986
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 69ad1600cfa343e9aea7a65bfb50a999
+run_name: efficient-steed-161
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1779262930958
+status: 3
+tags: []
+user_id: root

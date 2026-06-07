@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/84fbd515384b4c57ba6b32c62c354757/artifacts
+end_time: 1775229772651
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 84fbd515384b4c57ba6b32c62c354757
+run_name: gentle-ram-604
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775229772591
+status: 3
+tags: []
+user_id: root

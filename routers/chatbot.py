@@ -41,6 +41,7 @@ class ChatState(TypedDict):
     context:       List[dict]
     answer:        str
     spam_reason:   Optional[str]
+    document_id:   Optional[str]  # UUID from POST /documents/upload
 
 
 # ══════════════════════════════════════════════════════════════
@@ -79,9 +80,16 @@ def retrieve_node(state: ChatState) -> ChatState:
       navigational → keyword-heavy (0.25 / 0.75)
       comparison  → balanced + wider fetch
 
+    When document_id is present, results from the uploaded document are
+    merged with the site knowledge base before reranking.
+
     chitchat / off_topic skip this node via routing (context stays empty).
     """
-    docs = intent_aware_retrieve(state["question"], state["intent_config"])
+    docs = intent_aware_retrieve(
+        state["question"],
+        state["intent_config"],
+        document_id=state.get("document_id"),
+    )
 
     context = [
         {
@@ -89,6 +97,7 @@ def retrieve_node(state: ChatState) -> ChatState:
             "title":        doc.metadata["title"],
             "content":      doc.page_content,
             "rerank_score": doc.metadata.get("rerank_score", 0.0),
+            "source_type":  doc.metadata.get("source_type", "knowledge_base"),
         }
         for doc in docs
     ]
@@ -102,6 +111,8 @@ _rag_prompt = ChatPromptTemplate.from_messages([
         (
             "You are a helpful assistant for a Drupal website. "
             "Answer questions based only on the provided context. "
+            "Context may include content from the site knowledge base and from "
+            "user-uploaded documents — treat both equally. "
             "Mention the source title when referencing specific information. "
             "If the context doesn't contain relevant information, say so clearly."
         ),
@@ -182,8 +193,13 @@ async def ask(data: ChatRequest):
     3. Cache answer for 1 hour
     """
     try:
-        # ── Step 1: Check cache ───────────────────────────────
-        cached = await get_response_cache(data.question)
+        # ── Step 1: Check cache (skip when a document is attached) ──
+        # Document-scoped answers must not be served from or written to the
+        # general cache, since the same question with a different document
+        # would produce a different answer.
+        cached = None
+        if not data.document_id:
+            cached = await get_response_cache(data.question)
         if cached:
             return {
                 "question": data.question,
@@ -206,6 +222,7 @@ async def ask(data: ChatRequest):
                 "context":       [],
                 "answer":        "",
                 "spam_reason":   None,
+                "document_id":   data.document_id,
             })
 
         # ── Handle spam ───────────────────────────────────────
@@ -225,23 +242,26 @@ async def ask(data: ChatRequest):
                 "node_id":      d["node_id"],
                 "title":        d["title"],
                 "rerank_score": d.get("rerank_score", 0),
+                "source_type":  d.get("source_type", "knowledge_base"),
             }
             for d in result["context"]
         ]
 
-        # ── Step 5: Cache the answer ──────────────────────────
-        await set_response_cache(data.question, result["answer"], sources)
+        # ── Step 5: Cache the answer (only for pure KB queries) ──
+        if not data.document_id:
+            await set_response_cache(data.question, result["answer"], sources)
 
         # ── Track in MLflow (background — don't block response) ──
         loop.run_in_executor(None, track_chatbot, data.question,
             result["answer"], result["context"], t.elapsed, LLM_MODEL, False, None)
 
         return {
-            "question": data.question,
-            "intent":   result.get("intent"),
-            "answer":   result["answer"],
-            "sources":  sources,
-            "cached":   False,
+            "question":    data.question,
+            "intent":      result.get("intent"),
+            "answer":      result["answer"],
+            "sources":     sources,
+            "document_id": data.document_id,
+            "cached":      False,
         }
 
     except HTTPException:

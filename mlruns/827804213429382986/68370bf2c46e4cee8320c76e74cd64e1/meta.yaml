@@ -1,0 +1,14 @@
+artifact_uri: file:///app/mlruns/827804213429382986/68370bf2c46e4cee8320c76e74cd64e1/artifacts
+end_time: 1775477929437
+entry_point_name: ''
+experiment_id: '827804213429382986'
+lifecycle_stage: active
+run_id: 68370bf2c46e4cee8320c76e74cd64e1
+run_name: glamorous-shark-717
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1775477929412
+status: 3
+tags: []
+user_id: root
